@@ -4,14 +4,14 @@ import json
 import requests
 import time
 import sys
-import os
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 
 # --- Configuration ---
-# API key is left empty; the environment will provide it at runtime.
-# apiKey = "" 
-apiKey = os.getenv("GEMINI_API_KEY")
-# API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
-API_URL =   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+# API key is no longer needed here; the genai.Client() automatically finds it
+# from environment variables (GEMINI_API_KEY).
+API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
 MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 MAX_RETRIES = 3
 
@@ -51,6 +51,7 @@ Please REVISE the entire itinerary based on the user's feedback. Output only the
 class TravelAgent:
     """
     An interactive, stateful AI agent built in plain Python to manage a travel plan.
+    Uses the google-genai SDK for API calls.
     """
     def __init__(self, destination, start_date, end_date):
         self.destination = destination
@@ -59,61 +60,78 @@ class TravelAgent:
         self.interests = None
         self.current_plan = None
         
-        # Memory structure: Stores conversation history for context
-        self.chat_history = []
+        # Initialize the Gemini client
+        try:
+            self.client = genai.Client()
+        except Exception as e:
+            print(f"Error initializing Gemini client: {e}", file=sys.stderr)
+            print("Please ensure the GEMINI_API_KEY environment variable is set.", file=sys.stderr)
+            sys.exit(1)
         
-        # Add the system instruction to the beginning of the chat history
-        self.chat_history.append({"role": "system", "parts": [{"text": SYSTEM_INSTRUCTION}]})
+        # Memory structure: Stores conversation history for context (will be types.Content list)
+        self.chat_history: list[types.Content] = []
+        
+        # NOTE: System instructions are now passed via configuration, not in chat_history,
+        # but we use self.system_instruction to store the prompt content.
+        self.system_instruction = SYSTEM_INSTRUCTION
+
 
     def _call_gemini(self, user_prompt, temperature=0.7):
-        """Generic function to call the Gemini API with exponential backoff."""
-        
-        # Add the new user prompt to the history for the API call
-        self.chat_history.append({"role": "user", "parts": [{"text": user_prompt}]})
+        """Generic function to call the Gemini API using genai.Client with exponential backoff."""
 
-        payload = {
-            "contents": self.chat_history,
-            "config": {
-                "temperature": temperature,
-                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]}
-            }
-        }
+        print("User prompt is :" + user_prompt)
         
-        headers = {'x-goog-api-key':'${API_KEY}', 'Content-Type': 'application/json'}
+        # CORRECTED: Pass the text string directly to the Part object
+        # The constructor for Part.from_text() takes one string argument.
+        new_user_content = types.Content(role="user", parts=[types.Part(text=user_prompt)])
+        self.chat_history.append(new_user_content)
+
+        # Configure the request
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            # The system instruction is passed outside the contents list
+            system_instruction=self.system_instruction
+        )
         
         for attempt in range(MAX_RETRIES):
             try:
-                # The API key is assumed to be provided by the environment if it's an empty string.
-                # If running locally and you have a key, you would set it here:
-                # apiUrl = f"{API_URL}?key={apiKey}"
+                response = self.client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=self.chat_history,
+                    config=config,
+                )
                 
-                response = requests.post(API_URL, headers=headers, data=json.dumps(payload))
-                response.raise_for_status() 
-
-                result = response.json()
-                
-                # Check for candidates and content
-                if 'candidates' in result and result['candidates'][0]['content']['parts'][0]['text']:
-                    text = result['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # Store the model's response in history for the next turn
-                    self.chat_history.append({"role": "model", "parts": [{"text": text}]})
-                    
-                    return text
-                else:
-                    print(f"API Error: Did not receive valid content in response: {result}", file=sys.stderr)
+                # Check for empty response or blocked content
+                if not response.candidates or not response.candidates[0].content.parts:
+                    print(f"API Error: Did not receive valid content in response.", file=sys.stderr)
+                    # We might get a response but no generated text if it was blocked or errored
                     return "Sorry, the AI could not generate a response. Please try again."
 
-            except requests.exceptions.RequestException as e:
-                print(f"Request failed (Attempt {attempt + 1}/{MAX_RETRIES}): {e}", file=sys.stderr)
+                text = response.text
+                
+                # Store the model's response in history for the next turn
+                # CORRECTED: Pass the text string directly to the Part object
+                model_content = types.Content(role="model", parts=[types.Part(text=text)])
+                self.chat_history.append(model_content)
+                
+                return text
+
+            except APIError as e:
+                print(f"API Call failed (Attempt {attempt + 1}/{MAX_RETRIES}): {e}", file=sys.stderr)
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt) # Exponential backoff
                 else:
                     return "Error: Unable to connect to the AI service after multiple retries."
-        
+            except Exception as e:
+                # Catch other potential errors (e.g., JSON parsing if using raw fetch, though less likely with SDK)
+                print(f"An unexpected error occurred (Attempt {attempt + 1}/{MAX_RETRIES}): {e}", file=sys.stderr)
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    return "Critical Error: An unrecoverable error occurred."
+
         # Fallback response if all retries fail
-        self.chat_history.pop() # Remove the last user prompt if it failed
-        return "Critical Error: The AI service is currently unavailable. Please try again later."
+        return "Critical Error: The AI service is currently unavailable."
 
 
     def _get_initial_plan(self):
@@ -129,12 +147,17 @@ class TravelAgent:
 
     def _update_plan(self, user_feedback):
         """Revises the itinerary based on user feedback."""
-        prompt = REVISION_PLAN_PROMPT.format(
+        # We need to construct a prompt that includes the current plan for the LLM to read.
+        # Since the plan itself is often long and formatted (Markdown list),
+        # we construct the revision prompt as the user input for the current turn.
+        
+        revision_prompt = REVISION_PLAN_PROMPT.format(
             current_plan=self.current_plan,
             user_feedback=user_feedback
         )
+        
         print("\n[AGENT] Revising plan based on your feedback...")
-        return self._call_gemini(prompt)
+        return self._call_gemini(revision_prompt)
     
     def run_agent(self):
         """The main interactive loop for the travel agent."""
@@ -159,6 +182,8 @@ class TravelAgent:
         # --- PHASE 2: Generate Initial Plan ---
         
         new_plan = self._get_initial_plan()
+        
+        # Check for error state from API call
         if not new_plan.startswith("Error"):
             self.current_plan = new_plan
             print("\n" * 2)
@@ -192,7 +217,8 @@ class TravelAgent:
 
             if not revised_plan.startswith("Error"):
                 # Update the state (memory) with the new plan
-                self.current_plan = revised_plan
+                # Note: We overwrite the plan state, but the full interaction history remains in self.chat_history
+                self.current_plan = revised_plan 
                 print("\n" * 2)
                 print("=" * 50)
                 print("🔄 REVISED ITINERARY 🔄")
@@ -215,10 +241,9 @@ if __name__ == "__main__":
     START_DATE = "October 10, 2025"
     END_DATE = "October 14, 2025"
     
-    # Check if the API key is set (Note: this is often handled by the runtime environment)
-    if not API_URL:
-        print("Please ensure the API_URL is correctly defined.", file=sys.stderr)
-    
+    # Note: The SDK automatically looks for the GEMINI_API_KEY environment variable.
+    # No need for manual key handling here.
+
     try:
         agent = TravelAgent(DESTINATION, START_DATE, END_DATE)
         agent.run_agent()
