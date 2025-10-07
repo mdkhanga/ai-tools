@@ -25,7 +25,7 @@ You MUST follow these rules strictly:
 1. When asked to generate or revise a plan, your entire response MUST be formatted strictly as a single Markdown list.
 2. The plan must be structured by day.
 3. If the user asks for a revision, analyze the current plan and the user's request, then output the REVISED, COMPLETE plan.
-4. If you need more information (e.g., interests are still missing), respond with a conversational question instead of a plan.
+4. **DO NOT ASK FOR MORE INTERESTS** if the user has already provided some input. **ALWAYS** generate the plan based on the data available.
 5. Keep the plan concise and focused on major tourist sights and activities.
 """
 
