@@ -23,9 +23,10 @@ You are a helpful, iterative travel planning AI. Your goal is to create a multi-
 You MUST follow these rules strictly:
 1. When asked to generate or revise a plan, your entire response MUST be formatted strictly as a single Markdown list.
 2. The plan must be structured by day.
-3. If the user asks for a revision, analyze the current plan and the user's request, then output the REVISED, COMPLETE plan.
-4. **DO NOT ASK FOR MORE INTERESTS** if the user has already provided some input. **ALWAYS** generate the plan based on the data available.
-5. Keep the plan concise and focused on major tourist sights and activities.
+3. The plan must take weather for that place and time period into account.
+4. If the user asks for a revision, analyze the current plan and the user's request, then output the REVISED, COMPLETE plan.
+5. **DO NOT ASK FOR MORE INTERESTS** if the user has already provided some input. **ALWAYS** generate the plan based on the data available.
+6. Keep the plan concise and focused on major tourist sights and activities.
 """
 
 # The initial prompt template
@@ -236,15 +237,18 @@ class TravelAgent:
 # --- Execution Block ---
 if __name__ == "__main__":
     # --- Simulated User Inputs ---
-    DESTINATION = "Rome, Italy"
-    START_DATE = "October 10, 2025"
-    END_DATE = "October 14, 2025"
+ #   DESTINATION = "Rome, Italy"
+    destination = input("Enter your desired city and/or country (e.g., 'Rome, Italy'): ")
+    # START_DATE = "October 10, 2025"
+    start_date = input("Enter the start date of your trip (YYYY-MM-DD): ")
+    # END_DATE = "October 14, 2025"
+    end_date = input("Enter the end date of your trip (YYYY-MM-DD): ")
     
     # Note: The SDK automatically looks for the GEMINI_API_KEY environment variable.
     # No need for manual key handling here.
 
     try:
-        agent = TravelAgent(DESTINATION, START_DATE, END_DATE)
+        agent = TravelAgent(destination, start_date, end_date)
         agent.run_agent()
     except Exception as e:
         print(f"\nAn unhandled error occurred: {e}", file=sys.stderr)
