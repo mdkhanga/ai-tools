@@ -7,11 +7,13 @@
  * and generates/modifies code based on user instructions.
  */
 
-const VERSION = "0.1.0";
+import { startRepl } from "./cli/repl.js";
 
-function main(): void {
-  console.log(`mycoder-agent v${VERSION} started`);
-  console.log("Ready to assist with your codebase.");
+async function main(): Promise<void> {
+  await startRepl();
 }
 
-main();
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});
