@@ -5,8 +5,17 @@
 import * as readline from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { display } from "./display.js";
+import {
+  loadConfig,
+  validateConfig,
+  formatConfigForDisplay,
+  type RuntimeConfig,
+} from "../config/index.js";
 
 const VERSION = "0.1.0";
+
+/** Runtime configuration - loaded at startup */
+let runtimeConfig: RuntimeConfig;
 
 /** Built-in commands that the REPL handles directly */
 const COMMANDS: Record<string, { description: string; handler: () => boolean }> = {
@@ -20,6 +29,14 @@ const COMMANDS: Record<string, { description: string; handler: () => boolean }> 
       display.newline();
       display.dim("Type any other text to chat with the agent.");
       return true; // continue REPL
+    },
+  },
+  "/config": {
+    description: "Show current configuration",
+    handler: () => {
+      display.section("Configuration");
+      console.log(formatConfigForDisplay(runtimeConfig));
+      return true;
     },
   },
   "/quit": {
@@ -70,8 +87,21 @@ function handleInput(input: string): boolean {
  * Start the interactive REPL
  */
 export async function startRepl(): Promise<void> {
+  // Load configuration
+  runtimeConfig = loadConfig();
+
   display.banner(`mycoder-agent v${VERSION}`);
   display.newline();
+
+  // Validate configuration and show warnings
+  const errors = validateConfig(runtimeConfig);
+  if (errors.length > 0) {
+    for (const error of errors) {
+      display.warn(error);
+    }
+    display.newline();
+  }
+
   display.info("AI coding agent ready. Type /help for commands.");
   display.newline();
 
