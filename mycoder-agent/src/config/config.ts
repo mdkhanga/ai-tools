@@ -36,6 +36,7 @@ function loadAPIKeys(): APIKeys {
   return {
     openai: process.env.OPENAI_API_KEY,
     gemini: process.env.GEMINI_API_KEY,
+    anthropic: process.env.ANTHROPIC_API_KEY,
   };
 }
 
@@ -71,7 +72,7 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
 
   // LLM provider override
   const provider = process.env.MYCODER_LLM_PROVIDER;
-  if (provider === "openai" || provider === "gemini") {
+  if (provider === "openai" || provider === "gemini" || provider === "anthropic") {
     result.llm = { ...result.llm, provider: provider as LLMProvider };
   }
 
@@ -133,6 +134,10 @@ export function validateConfig(runtime: RuntimeConfig): string[] {
     errors.push("GEMINI_API_KEY environment variable is required for Gemini provider");
   }
 
+  if (config.llm.provider === "anthropic" && !keys.anthropic) {
+    errors.push("ANTHROPIC_API_KEY environment variable is required for Anthropic provider");
+  }
+
   return errors;
 }
 
@@ -157,6 +162,7 @@ export function formatConfigForDisplay(runtime: RuntimeConfig): string {
     "API Keys:",
     `  OpenAI: ${keys.openai ? "configured" : "not set"}`,
     `  Gemini: ${keys.gemini ? "configured" : "not set"}`,
+    `  Anthropic: ${keys.anthropic ? "configured" : "not set"}`,
   ];
 
   return lines.join("\n");

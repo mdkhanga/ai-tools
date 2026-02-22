@@ -11,11 +11,15 @@ import {
   formatConfigForDisplay,
   type RuntimeConfig,
 } from "../config/index.js";
+import { createLLM, Conversation } from "../llm/index.js";
 
 const VERSION = "0.1.0";
 
 /** Runtime configuration - loaded at startup */
 let runtimeConfig: RuntimeConfig;
+
+/** Conversation instance - maintains chat history */
+let conversation: Conversation | null = null;
 
 /** Built-in commands that the REPL handles directly */
 const COMMANDS: Record<string, { description: string; handler: () => boolean }> = {
@@ -39,9 +43,44 @@ const COMMANDS: Record<string, { description: string; handler: () => boolean }> 
       return true;
     },
   },
+  "/usage": {
+    description: "Show token usage for this session",
+    handler: () => {
+      if (conversation) {
+        const usage = conversation.sessionUsage;
+        display.section("Session Token Usage");
+        console.log(`  Requests:      ${usage.requestCount}`);
+        console.log(`  Input tokens:  ${usage.totalInputTokens.toLocaleString()}`);
+        console.log(`  Output tokens: ${usage.totalOutputTokens.toLocaleString()}`);
+        console.log(`  Total tokens:  ${(usage.totalInputTokens + usage.totalOutputTokens).toLocaleString()}`);
+      } else {
+        display.warn("No active conversation.");
+      }
+      return true;
+    },
+  },
+  "/clear": {
+    description: "Clear conversation history",
+    handler: () => {
+      if (conversation) {
+        conversation.clear();
+        display.success("Conversation history cleared.");
+      } else {
+        display.warn("No active conversation.");
+      }
+      return true;
+    },
+  },
   "/quit": {
     description: "Exit the agent",
     handler: () => {
+      // Show final usage before exit
+      if (conversation) {
+        const usage = conversation.sessionUsage;
+        if (usage.requestCount > 0) {
+          display.dim(`Session total: ${usage.totalInputTokens.toLocaleString()} in / ${usage.totalOutputTokens.toLocaleString()} out tokens`);
+        }
+      }
       display.info("Goodbye!");
       return false; // exit REPL
     },
@@ -56,8 +95,8 @@ const COMMANDS: Record<string, { description: string; handler: () => boolean }> 
  * Handle user input - either a command or a message for the agent
  * Returns false if the REPL should exit
  */
-function handleInput(input: string): boolean {
-  const trimmed = input.trim();
+async function handleInput(userInput: string): Promise<boolean> {
+  const trimmed = userInput.trim();
 
   if (!trimmed) {
     return true; // empty input, continue
@@ -75,10 +114,24 @@ function handleInput(input: string): boolean {
     }
   }
 
-  // For now, echo the input (will be replaced with agent call in Task 4)
-  display.newline();
-  display.agent(`You said: ${trimmed}`);
-  display.newline();
+  // Send to LLM
+  if (!conversation) {
+    display.error("LLM not configured. Check your API keys with /config");
+    return true;
+  }
+
+  try {
+    display.dim("Thinking...");
+    const response = await conversation.chat(trimmed);
+    display.newline();
+    display.agent(response.content);
+    display.newline();
+    // Show token usage for this request
+    display.dim(`[tokens: ${response.usage.inputTokens.toLocaleString()} in / ${response.usage.outputTokens.toLocaleString()} out]`);
+    display.newline();
+  } catch (error) {
+    display.error(`LLM error: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   return true;
 }
@@ -102,6 +155,17 @@ export async function startRepl(): Promise<void> {
     display.newline();
   }
 
+  // Try to create LLM and conversation
+  try {
+    const llm = createLLM(runtimeConfig);
+    conversation = new Conversation(llm);
+    display.success(`LLM ready: ${runtimeConfig.config.llm.provider}/${runtimeConfig.config.llm.model}`);
+  } catch (error) {
+    display.warn(`LLM not available: ${error instanceof Error ? error.message : String(error)}`);
+    display.dim("You can still use commands. Set API keys in .env to enable chat.");
+  }
+
+  display.newline();
   display.info("AI coding agent ready. Type /help for commands.");
   display.newline();
 
@@ -113,8 +177,8 @@ export async function startRepl(): Promise<void> {
 
   rl.prompt();
 
-  rl.on("line", (line) => {
-    const shouldContinue = handleInput(line);
+  rl.on("line", async (line) => {
+    const shouldContinue = await handleInput(line);
     if (shouldContinue) {
       rl.prompt();
     } else {
