@@ -3,6 +3,14 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from config import Config
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global counter for LLM calls
+llm_call_counter = 0
 
 
 class EmailDraftState(TypedDict):
@@ -26,10 +34,10 @@ class ReflectionEmailComposer:
     4. Repeat until satisfactory or max iterations reached
     """
 
-    def __init__(self, max_revisions: int = 2):
+    def __init__(self, max_revisions: int = 1):
         self.max_revisions = max_revisions
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.0-flash",
             google_api_key=Config.GEMINI_API_KEY,
             temperature=0.7
         )
@@ -64,48 +72,44 @@ class ReflectionEmailComposer:
         return workflow.compile()
 
     def _generate_draft(self, state: EmailDraftState):
-        """Generate initial email draft"""
-        prompt = f"""Generate a professional email based on this request:
+        """Generate initial email draft with self-reflection in one call"""
+        global llm_call_counter
+        llm_call_counter += 1
+        logger.info(f"🔵 LLM CALL #{llm_call_counter} - reflection_composer._generate_draft()")
+        print(f"🔵 LLM CALL #{llm_call_counter} - Generating email with built-in reflection")
 
-{state['request']}
+        prompt = f"""Generate a professional email based on this request, then critique and improve it.
 
-Write a clear, concise, and professional email. Include:
+Request: {state['request']}
+
+Step 1: Write an initial draft email with:
 - Appropriate greeting
 - Clear subject line suggestion
 - Well-structured body
 - Professional closing
 
-Email draft:"""
+Step 2: Self-critique the draft on:
+- Clarity and conciseness
+- Professional tone
+- Grammar and spelling
+- Completeness
+
+Step 3: Provide the final improved version.
+
+Respond ONLY with the final improved email (not the critique or initial draft)."""
 
         response = self.llm.invoke([HumanMessage(content=prompt)])
         return {
             "draft": response.content,
             "revision_count": 0,
-            "max_revisions": self.max_revisions
+            "max_revisions": self.max_revisions,
+            "critique": "Generated with built-in reflection"
         }
 
     def _reflect_on_draft(self, state: EmailDraftState):
-        """Critically evaluate the email draft"""
-        prompt = f"""You are an expert email communication critic. Review this email draft and provide constructive feedback.
-
-Original Request: {state['request']}
-
-Email Draft:
-{state['draft']}
-
-Evaluate the email on:
-1. Clarity and conciseness
-2. Professional tone
-3. Grammar and spelling
-4. Completeness (addresses all points in the request)
-5. Appropriate greeting and closing
-
-Provide specific, actionable critique. If the email is excellent, say "APPROVED".
-
-Critique:"""
-
-        response = self.llm.invoke([HumanMessage(content=prompt)])
-        return {"critique": response.content}
+        """Skip explicit reflection - already done during generation"""
+        print(f"📝 Reflecting on draft (no LLM call - returning APPROVED)")
+        return {"critique": "APPROVED - Generated with built-in reflection"}
 
     def _should_revise(self, state: EmailDraftState):
         """Decide whether to revise or finalize"""
@@ -116,6 +120,11 @@ Critique:"""
 
     def _revise_draft(self, state: EmailDraftState):
         """Revise the draft based on critique"""
+        global llm_call_counter
+        llm_call_counter += 1
+        logger.warning(f"⚠️ LLM CALL #{llm_call_counter} - reflection_composer._revise_draft() - THIS SHOULD NOT BE CALLED!")
+        print(f"⚠️ LLM CALL #{llm_call_counter} - Revising draft (unexpected!)")
+
         prompt = f"""Revise this email draft based on the critique provided.
 
 Original Request: {state['request']}
@@ -138,6 +147,9 @@ Revised Email:"""
 
     def _finalize(self, state: EmailDraftState):
         """Finalize the email"""
+        print(f"✅ Finalizing email (no LLM call)")
+        global llm_call_counter
+        print(f"\n📊 TOTAL LLM CALLS FOR COMPOSE: {llm_call_counter}")
         return {"final_email": state['draft']}
 
     def compose(self, request: str):
@@ -150,6 +162,11 @@ Revised Email:"""
         Returns:
             Dictionary with final_email and reflection history
         """
+        # Reset LLM call counter for this compose operation
+        global llm_call_counter
+        llm_call_counter = 0
+        print(f"🔄 Starting new compose operation (counter reset to 0)\n")
+
         initial_state = {
             "request": request,
             "draft": "",
