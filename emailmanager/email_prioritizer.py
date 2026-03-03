@@ -6,6 +6,14 @@ from gmail_tools import get_gmail_service
 from config import Config
 import base64
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global counter for LLM calls
+llm_call_counter = 0
 
 
 class PrioritizerState(TypedDict):
@@ -27,10 +35,10 @@ class EmailPrioritizer:
     4. Returns top N most important emails with summary
     """
 
-    def __init__(self, top_n: int = 5):
+    def __init__(self, top_n: int = 3):
         self.top_n = top_n
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.0-flash",
             google_api_key=Config.GEMINI_API_KEY,
             temperature=0.3  # Lower temperature for more consistent analysis
         )
@@ -62,7 +70,7 @@ class EmailPrioritizer:
             results = service.users().messages().list(
                 userId='me',
                 q='is:unread in:inbox',
-                maxResults=20
+                maxResults=10
             ).execute()
 
             messages = results.get('messages', [])
@@ -105,56 +113,85 @@ class EmailPrioritizer:
             return {"emails": []}
 
     def _analyze_importance(self, state: PrioritizerState):
-        """Analyze importance of each email using AI"""
-        analyzed_emails = []
+        """Analyze importance of all emails using AI in a single batch call"""
+        if not state['emails']:
+            return {"analyzed_emails": []}
 
-        for email in state['emails']:
-            prompt = f"""Analyze the importance of this email on a scale of 1-10.
+        # Build batch prompt with all emails
+        emails_text = ""
+        for i, email in enumerate(state['emails']):
+            emails_text += f"""
+Email {i+1}:
+  From: {email['from']}
+  Subject: {email['subject']}
+  Date: {email['date']}
+  Preview: {email['snippet']}
+"""
 
-Consider:
+        prompt = f"""Analyze the importance of each email below on a scale of 1-10.
+
+Consider for each email:
 - Sender authority/importance
 - Subject urgency
 - Content requiring action
 - Time sensitivity
 - Business/personal relevance
 
-Email Details:
-From: {email['from']}
-Subject: {email['subject']}
-Date: {email['date']}
-Preview: {email['snippet']}
+{emails_text}
 
-Respond with ONLY a JSON object in this format:
-{{"importance_score": <number 1-10>, "reason": "<brief explanation>"}}"""
+Respond with ONLY a JSON array where each element corresponds to an email (in order, starting from Email 1) with this format:
+[
+  {{"email_number": 1, "importance_score": <number 1-10>, "reason": "<brief explanation>"}},
+  {{"email_number": 2, "importance_score": <number 1-10>, "reason": "<brief explanation>"}},
+  ...
+]"""
 
-            try:
-                response = self.llm.invoke([HumanMessage(content=prompt)])
-                # Parse the response
-                response_text = response.content.strip()
+        try:
+            global llm_call_counter
+            llm_call_counter += 1
+            logger.info(f"🔵 LLM CALL #{llm_call_counter} - email_prioritizer._analyze_importance() - Batch analyzing {len(state['emails'])} emails")
+            print(f"🔵 LLM CALL #{llm_call_counter} - Analyzing {len(state['emails'])} emails in batch")
 
-                # Extract JSON from response (handle markdown code blocks)
-                if '```json' in response_text:
-                    response_text = response_text.split('```json')[1].split('```')[0].strip()
-                elif '```' in response_text:
-                    response_text = response_text.split('```')[1].split('```')[0].strip()
+            response = self.llm.invoke([HumanMessage(content=prompt)])
+            response_text = response.content.strip()
 
-                analysis = json.loads(response_text)
+            # Extract JSON from response (handle markdown code blocks)
+            if '```json' in response_text:
+                response_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                response_text = response_text.split('```')[1].split('```')[0].strip()
+
+            analyses = json.loads(response_text)
+
+            # Match analyses with emails
+            analyzed_emails = []
+            for i, email in enumerate(state['emails']):
+                # Find the analysis for this email (email_number is 1-indexed)
+                analysis = next((a for a in analyses if a.get('email_number') == i + 1), None)
 
                 email_with_score = email.copy()
-                email_with_score['importance_score'] = analysis.get('importance_score', 5)
-                email_with_score['importance_reason'] = analysis.get('reason', 'No reason provided')
+                if analysis:
+                    email_with_score['importance_score'] = analysis.get('importance_score', 5)
+                    email_with_score['importance_reason'] = analysis.get('reason', 'No reason provided')
+                else:
+                    email_with_score['importance_score'] = 5
+                    email_with_score['importance_reason'] = 'Analysis not found'
 
                 analyzed_emails.append(email_with_score)
 
-            except Exception as e:
-                print(f"Error analyzing email {email['id']}: {e}")
-                # Default score if analysis fails
+            return {"analyzed_emails": analyzed_emails}
+
+        except Exception as e:
+            print(f"Error analyzing emails in batch: {e}")
+            # Fallback: assign default scores
+            analyzed_emails = []
+            for email in state['emails']:
                 email_with_score = email.copy()
                 email_with_score['importance_score'] = 5
-                email_with_score['importance_reason'] = 'Analysis failed'
+                email_with_score['importance_reason'] = 'Batch analysis failed'
                 analyzed_emails.append(email_with_score)
 
-        return {"analyzed_emails": analyzed_emails}
+            return {"analyzed_emails": analyzed_emails}
 
     def _rank_emails(self, state: PrioritizerState):
         """Rank emails by importance and select top N"""
