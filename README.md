@@ -9,4 +9,4 @@ Currently works with Gemini.
 Required:   
 export GEMINI_API_KEY=#####
 
-## Code generation Agent
+## Code generation Agent like claude
