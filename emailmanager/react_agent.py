@@ -27,7 +27,7 @@ class EmailReActAgent:
     def __init__(self):
         # Initialize Gemini model
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.0-flash",
             google_api_key=Config.GEMINI_API_KEY,
             temperature=0.7
         )
