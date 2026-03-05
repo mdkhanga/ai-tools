@@ -34,7 +34,7 @@ def print_menu():
     print("Available Commands:")
     print("=" * 70)
     print("1. chat          - Chat with the ReAct email agent")
-    print("2. important     - Get today's 5 most important emails (AI prioritization)")
+    print("2. important     - Get today's 3 most important emails (AI prioritization)")
     print("3. compose       - Compose email with reflection pattern")
     print("4. search        - Quick search emails")
     print("5. help          - Show this menu")
@@ -69,21 +69,21 @@ def chat_mode():
 
 
 def get_important_emails():
-    """Get top 5 important emails using AI prioritization"""
+    """Get top 3 important emails using AI prioritization"""
     print("\n📧 Analyzing your emails to find the most important ones...")
     print("This uses a multi-step LangGraph workflow:\n")
-    print("  1. Fetching unread emails")
-    print("  2. Analyzing importance with AI")
+    print("  1. Fetching last 10 unread emails")
+    print("  2. Analyzing importance with AI (batch call)")
     print("  3. Ranking by priority")
     print("  4. Generating summary\n")
 
     try:
-        prioritizer = EmailPrioritizer(top_n=5)
+        prioritizer = EmailPrioritizer(top_n=3)
         result = prioritizer.get_top_important_emails()
 
         print(f"\n✨ Analyzed {result['total_analyzed']} emails\n")
         print("=" * 70)
-        print("TOP 5 MOST IMPORTANT EMAILS")
+        print("TOP 3 MOST IMPORTANT EMAILS")
         print("=" * 70)
 
         if not result['top_emails']:
@@ -120,14 +120,17 @@ def compose_with_reflection():
         return
 
     print("\n🔄 Composing with reflection pattern...")
-    print("  1. Generating initial draft")
-    print("  2. Self-critiquing the draft")
-    print("  3. Revising based on critique")
-    print("  4. Finalizing\n")
+    print("  1. Generating draft with built-in reflection")
+    print("  2. Finalizing\n")
+    print("=" * 70)
+    print("LLM CALL TRACKING")
+    print("=" * 70)
 
     try:
-        composer = ReflectionEmailComposer(max_revisions=2)
+        composer = ReflectionEmailComposer(max_revisions=1)
         result = composer.compose(request)
+
+        print("=" * 70)
 
         print("=" * 70)
         print("FINAL EMAIL (after reflection)")
