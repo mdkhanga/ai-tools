@@ -114,22 +114,27 @@ async function handleInput(userInput: string): Promise<boolean> {
     }
   }
 
-  // Send to LLM
+  // Send to LLM with streaming
   if (!conversation) {
     display.error("LLM not configured. Check your API keys with /config");
     return true;
   }
 
   try {
-    display.dim("Thinking...");
-    const response = await conversation.chat(trimmed);
     display.newline();
-    display.agent(response.content);
+
+    // Stream response token by token
+    const response = await conversation.chatStream(trimmed, (token) => {
+      process.stdout.write(token);
+    });
+
+    // End the streamed line and show usage
     display.newline();
-    // Show token usage for this request
+    display.newline();
     display.dim(`[tokens: ${response.usage.inputTokens.toLocaleString()} in / ${response.usage.outputTokens.toLocaleString()} out]`);
     display.newline();
   } catch (error) {
+    display.newline();
     display.error(`LLM error: ${error instanceof Error ? error.message : String(error)}`);
   }
 

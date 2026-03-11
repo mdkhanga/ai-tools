@@ -41,6 +41,12 @@ export interface ChatResponse {
   usage: TokenUsage;
 }
 
+/** Streaming response - yields content chunks, returns usage at end */
+export interface StreamingChatResponse {
+  content: string;
+  usage: TokenUsage;
+}
+
 /** Cumulative token usage for a session */
 export interface SessionUsage {
   totalInputTokens: number;
@@ -127,6 +133,56 @@ export class Conversation {
     this.history.push(new AIMessage(content));
 
     return { content, usage };
+  }
+
+  /**
+   * Send a message and stream the response token by token
+   * @param userMessage The user's message
+   * @param onToken Callback called for each token received
+   * @returns The complete response with usage stats
+   */
+  async chatStream(
+    userMessage: string,
+    onToken: (token: string) => void
+  ): Promise<StreamingChatResponse> {
+    // Add user message to history
+    this.history.push(new HumanMessage(userMessage));
+
+    // Stream response from LLM
+    const stream = await this.model.stream(this.history);
+
+    let fullContent = "";
+    let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+
+    for await (const chunk of stream) {
+      // Extract text content from chunk
+      const chunkContent = typeof chunk.content === "string"
+        ? chunk.content
+        : "";
+
+      if (chunkContent) {
+        fullContent += chunkContent;
+        onToken(chunkContent);
+      }
+
+      // Check for usage metadata (usually in the last chunk)
+      if (chunk.usage_metadata) {
+        usage = {
+          inputTokens: chunk.usage_metadata.input_tokens ?? 0,
+          outputTokens: chunk.usage_metadata.output_tokens ?? 0,
+        };
+      }
+    }
+
+    // Update session totals
+    this._sessionUsage.totalInputTokens += usage.inputTokens;
+    this._sessionUsage.totalOutputTokens += usage.outputTokens;
+    this._sessionUsage.requestCount += 1;
+
+    // Add assistant response to history
+    this.history.push(new AIMessage(fullContent));
+
+    return { content: fullContent, usage };
   }
 
   /**
