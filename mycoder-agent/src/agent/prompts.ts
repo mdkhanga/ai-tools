@@ -4,7 +4,17 @@
  * System prompts that define the agent's behavior
  */
 
-export const AGENT_SYSTEM_PROMPT = `You are an expert software engineer assistant with access to tools for exploring and understanding codebases.
+import type { ProjectInfo } from "../context/index.js";
+
+/** Project context for the system prompt */
+export interface ProjectContext {
+  workingDirectory: string;
+  projectInfo: ProjectInfo | null;
+  fileTree: string | null;
+}
+
+/** Base system prompt without project context */
+const BASE_SYSTEM_PROMPT = `You are an expert software engineer assistant with access to tools for exploring and understanding codebases.
 
 ## Your Capabilities
 
@@ -24,10 +34,6 @@ You can use the following tools:
 
 5. **Ask for clarification**: If a request is ambiguous, ask the user for more details.
 
-## Current Working Directory
-
-You are operating in the user's current working directory. File paths can be relative to this directory.
-
 ## Response Format
 
 - Use markdown formatting for code blocks
@@ -35,3 +41,48 @@ You are operating in the user's current working directory. File paths can be rel
 - Summarize findings clearly
 
 Remember: You have tools available - use them to gather information rather than making assumptions about the codebase.`;
+
+/**
+ * Build a system prompt with project context
+ */
+export function buildSystemPrompt(context?: ProjectContext): string {
+  let prompt = BASE_SYSTEM_PROMPT;
+
+  if (context) {
+    prompt += `\n\n## Current Project Context\n`;
+    prompt += `\nWorking Directory: ${context.workingDirectory}\n`;
+
+    if (context.projectInfo) {
+      const info = context.projectInfo;
+      prompt += `\n### Project Information\n`;
+
+      if (info.name) {
+        prompt += `- **Name**: ${info.name}\n`;
+      }
+      if (info.types.length > 0 && info.types[0] !== "unknown") {
+        prompt += `- **Type**: ${info.types.join(", ")}\n`;
+      }
+      if (info.languages.length > 0) {
+        prompt += `- **Languages**: ${info.languages.join(", ")}\n`;
+      }
+      if (info.frameworks.length > 0) {
+        prompt += `- **Frameworks**: ${info.frameworks.join(", ")}\n`;
+      }
+      if (info.packageManager) {
+        prompt += `- **Package Manager**: ${info.packageManager}\n`;
+      }
+      if (info.testFramework) {
+        prompt += `- **Test Framework**: ${info.testFramework}\n`;
+      }
+    }
+
+    if (context.fileTree) {
+      prompt += `\n### Project Structure\n\`\`\`\n${context.fileTree}\n\`\`\`\n`;
+    }
+  }
+
+  return prompt;
+}
+
+/** Default system prompt (no project context) */
+export const AGENT_SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;
