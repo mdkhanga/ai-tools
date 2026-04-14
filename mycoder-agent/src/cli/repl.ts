@@ -14,6 +14,7 @@ import {
 import { createLLM } from "../llm/index.js";
 import { AgentRunner, type ProjectContext } from "../agent/index.js";
 import { scanDirectory, formatFileTree, detectProject } from "../context/index.js";
+import { setReadlineInterface } from "../tools/index.js";
 
 const VERSION = "0.1.0";
 
@@ -190,7 +191,7 @@ export async function startRepl(): Promise<void> {
     const llm = createLLM(runtimeConfig);
     agent = new AgentRunner(llm, projectContext);
     display.success(`Agent ready: ${runtimeConfig.config.llm.provider}/${runtimeConfig.config.llm.model}`);
-    display.dim("Tools available: read_file, glob");
+    display.dim("Tools available: read_file, glob, write_file");
   } catch (error) {
     display.warn(`Agent not available: ${error instanceof Error ? error.message : String(error)}`);
     display.dim("You can still use commands. Set API keys in .env to enable the agent.");
@@ -205,6 +206,9 @@ export async function startRepl(): Promise<void> {
     output,
     prompt: "you> ",
   });
+
+  // Share readline with approval system
+  setReadlineInterface(rl);
 
   rl.prompt();
 
