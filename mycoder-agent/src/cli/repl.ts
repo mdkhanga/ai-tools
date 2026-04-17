@@ -191,7 +191,7 @@ export async function startRepl(): Promise<void> {
     const llm = createLLM(runtimeConfig);
     agent = new AgentRunner(llm, projectContext);
     display.success(`Agent ready: ${runtimeConfig.config.llm.provider}/${runtimeConfig.config.llm.model}`);
-    display.dim("Tools available: read_file, glob, write_file");
+    display.dim("Tools available: read_file, glob, write_file, edit_file");
   } catch (error) {
     display.warn(`Agent not available: ${error instanceof Error ? error.message : String(error)}`);
     display.dim("You can still use commands. Set API keys in .env to enable the agent.");
